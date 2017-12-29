@@ -256,3 +256,5 @@ Charts/
 
 # QuantConnect plugin files
 QuantConnectProjects.xml
+
+.DS_Store
