@@ -176,6 +176,7 @@
     <Compile Include="OrderTicketDemoAlgorithm.cs" />
     <Compile Include="WeeklyUniverseSelectionRegressionAlgorithm.cs" />
     <Compile Include="OptionChainProviderAlgorithm.cs" />
+    <Compile Include="JBCustomAlgorithm.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Algorithm.Framework\QuantConnect.Algorithm.Framework.csproj">

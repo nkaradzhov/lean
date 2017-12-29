@@ -6,21 +6,48 @@ using QuantConnect.Data.Consolidators;
 
 namespace QuantConnect.Algorithm.CSharp
 {
+    public enum Mode
+    {
+        MACD, HISTOGRAM, RSI
+    }
+
     public class JBCustomAlgorithm : QCAlgorithm
     {
         private readonly string _ticker = "LTCUSD";
-        private readonly Resolution RESOLUTION = Resolution.Minute;
         private readonly int EVERY = 1;
+        private readonly Resolution RESOLUTION = Resolution.Minute;
 
+        /*** Mode.MACD Mode.HISTOGRAM Mode.RSI ***/
+        private readonly Mode mode = Mode.RSI;
+
+        /*** MACD params ***/
         private readonly int MACD_FAST = 12;
         private readonly int MACD_SLOW = 26;
         private readonly int MACD_SIGNAL = 9;
+        /*** MACD params ***/
 
+        /*** Histogram params ***/
+        private readonly decimal STEP = 0.04m; // 0.04m za histogram1 0.02 za histogram2
+        /*** Histogram params ***/
+
+        /*** RSI params ***/
+        private readonly int PERIOD = 7;
+        private readonly int HIGH = 70;
+        private readonly int LOW = 30;
+        /*** RSI params ***/
+
+        /*** set 0 to turn off ***/
         private readonly decimal SECURE_PROFIT_PERCENT = 1.15m;
+        /*** set 0 to turn off ***/
         private readonly decimal STOP_LOSS_PERCENT = 0.98m;
 
+
         private MovingAverageConvergenceDivergence _macd;
+        private ParabolicStopAndReverse _sar;
+        private RelativeStrengthIndex _rsi;
+
         private List<Orders.OrderTicket> _currentOpenOrders = new List<Orders.OrderTicket>();
+        private TradeBarConsolidator consolidator;
 
         public override void Initialize()
         {
@@ -29,17 +56,93 @@ namespace QuantConnect.Algorithm.CSharp
             SetCash(100000);
             AddCrypto(_ticker, RESOLUTION, Market.GDAX);
 
-            var consolidator = new TradeBarConsolidator(EVERY);
+            consolidator = new TradeBarConsolidator(EVERY);
             consolidator.DataConsolidated += BarHandler;
 
-            _macd = new MovingAverageConvergenceDivergence(MACD_FAST, MACD_SLOW, MACD_SIGNAL, MovingAverageType.Exponential);
-            RegisterIndicator(Symbol(_ticker), _macd, consolidator, (arg) => arg.Value);
+            InitIndicators();
 
             SubscriptionManager.AddConsolidator(Symbol(_ticker), consolidator);
 
         }
 
+        private void InitIndicators()
+        {
+            if (mode == Mode.MACD)
+            {
+                _macd = new MovingAverageConvergenceDivergence(MACD_FAST, MACD_SLOW, MACD_SIGNAL, MovingAverageType.Exponential);
+                RegisterIndicator(Symbol(_ticker), _macd, consolidator);
+                return;
+            }
+            if (mode == Mode.HISTOGRAM)
+            {
+                _sar = new ParabolicStopAndReverse("SAR", afIncrement: STEP);
+                RegisterIndicator(Symbol(_ticker), _sar, consolidator);
+                return;
+            }
+            if (mode == Mode.RSI)
+            {
+                _rsi = new RelativeStrengthIndex(PERIOD, MovingAverageType.Exponential);
+                RegisterIndicator(Symbol(_ticker), _rsi, consolidator);
+                return;
+            }
+            Debug("Invalid mode: " + mode);
+        }
+
         private void BarHandler(object sender, TradeBar data)
+        {
+            if (mode == Mode.MACD)
+            {
+                HandleMACD(sender, data);
+                return;
+            }
+            if (mode == Mode.HISTOGRAM)
+            {
+                HandleHistogram(sender, data);
+                return;
+            }
+            if (mode == Mode.RSI)
+            {
+                HandleRSI(sender, data);
+                return;
+            }
+            Debug("Invalid mode: " + mode);
+        }
+
+        private void HandleRSI(object sneder, TradeBar data)
+        {
+            if (!_rsi.IsReady) return;
+
+            var holding = Portfolio[_ticker];
+
+            if (holding.Quantity <= 0 && _rsi < LOW)
+            {
+                Buy(data);
+            }
+            else if (holding.Quantity > 0 && _rsi > HIGH)
+            {
+                Sell(data);
+            }
+        }
+
+        private void HandleHistogram(object sender, TradeBar data)
+        {
+            if (!_sar.IsReady) return;
+
+            //Debug(data.Price + " " + data.Close + " " + _sar);
+
+            var holding = Portfolio[_ticker];
+
+            if (holding.Quantity <= 0 && _sar < data.Price)
+            {
+                Buy(data);
+            }
+            else if (holding.Quantity > 0 && _sar > data.Price)
+            {
+                Sell(data);
+            }
+        }
+
+        private void HandleMACD(object sender, TradeBar data)
         {
             if (!_macd.IsReady) return;
 
@@ -51,16 +154,12 @@ namespace QuantConnect.Algorithm.CSharp
             // if our macd is greater than our signal, then let's go long
             if (holding.Quantity <= 0 && signalDeltaPercent > tolerance) // 0.01%
             {
-                ClearPendingOrders();
-                Debug("Buy at " + data.Price);
-                SetHoldings(Symbol(_ticker), 1.0);
+                Buy(data);
             }
             // of our macd is less than our signal, then let's go short
             else if (holding.Quantity > 0 && signalDeltaPercent < -tolerance)
             {
-                ClearPendingOrders();
-                Debug("Sell at " + data.Price);
-                Liquidate(Symbol(_ticker));
+                Sell(data);
             }
 
             // plot both lines
@@ -119,6 +218,20 @@ namespace QuantConnect.Algorithm.CSharp
                 }
             }
             _currentOpenOrders.Clear();
+        }
+
+        private void Buy(TradeBar data)
+        {
+            ClearPendingOrders();
+            Debug("Buy at " + data.Price);
+            SetHoldings(Symbol(_ticker), 1.0);
+        }
+
+        private void Sell(TradeBar data)
+        {
+            ClearPendingOrders();
+            Debug("Sell at " + data.Price);
+            Liquidate(Symbol(_ticker));
         }
     }
 
